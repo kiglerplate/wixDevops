@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nodejs-app-deployment
+  labels:
+    app: nodejs-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nodejs-app
+  template:
+    metadata:
+      labels:
+        app: nodejs-app
+    spec:
+      containers:
+        - name: nodejs-app
+          image: us-central1-docker.pkg.dev/PROJECT_ID/REPOSITORY/IMAGE:TAG # Placeholder: Update with your values in the workflow
+          ports:
+            - containerPort: 3000
