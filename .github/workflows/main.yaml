@@ -6,10 +6,10 @@ on:
       - main
 
 env:
-  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-  GKE_CLUSTER: kubecon-cluster # Replace with your cluster name
-  GKE_REGION: us-central1 # Replace with your cluster zone
-  REGION: us-central1 # Replace with your Artifact Registry region
+  PROJECT_ID: admin-sd-69c4d
+  GKE_CLUSTER: wix # Replace with your cluster name
+  GKE_REGION: europe-north1 # Replace with your cluster zone
+  REGION: europe-north1 # Replace with your Artifact Registry region
   GAR_REPOSITORY: real-world-devops # Replace with your Artifact Registry repository name
   IMAGE: nodejs-app
 
