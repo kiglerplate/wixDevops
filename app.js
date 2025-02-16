@@ -26,9 +26,19 @@ app.use(cors);
 app.use(cookieParser);
 app.use(express.json());
 
-app.use(cors);
-app.use(cookieParser);
-app.use(express.json());
+const puppeteer = require("puppeteer");
+
+(async () => {
+  const browser = await puppeteer.launch({
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  });
+
+  const page = await browser.newPage();
+  await page.goto("https://example.com");
+  console.log(await page.title());
+
+  await browser.close();
+})();
 
 const PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvRLCmgoSCQ0UpcCcdq7o
