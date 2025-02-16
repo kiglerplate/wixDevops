@@ -48,6 +48,8 @@ const clients = {}; // מפתח = clientId, ערך = client instance
 
 // 📌 יצירת לקוח וואטסאפ חדש
 const createWhatsAppClient = async (clientId) => {
+  console.log(`📌 מחובר  מחובר מחובר`);
+  console.log(clientId, `📌 מחובר  מחובר מחובר`);
   if (clients[clientId]) {
     console.log(`📌 לקוח ${clientId} כבר מחובר`);
     return clients[clientId];
