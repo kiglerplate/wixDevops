@@ -318,9 +318,6 @@ app.post("/webhook", express.text(), async (request, response) => {
   response.status(200).send();
 });
 
-const buyerRouter = require("./Router/buyerRouter");
-const needHelp = require("./Router/needHelp");
-
 app.listen(port, () => {
   console.log(`App listening on port ${port}`);
 });
