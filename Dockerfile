@@ -1,6 +1,15 @@
 # Use an official Node.js runtime as the base image
 FROM node:18-alpine
 
+# התקנת Chromium וכל התלויות החסרות כדי ש-Puppeteer יעבוד
+RUN apk add --no-cache \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont
+
 # Set the working directory inside the container
 WORKDIR /app
 
