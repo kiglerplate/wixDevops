@@ -1,7 +1,7 @@
 # Use an official Node.js runtime as the base image
 FROM node:18-alpine
 
-# התקנת Chromium וכל התלויות החסרות כדי ש-Puppeteer יעבוד
+# Install Chromium and dependencies required for Puppeteer to work
 RUN apk add --no-cache \
     chromium \
     nss \
@@ -9,6 +9,10 @@ RUN apk add --no-cache \
     harfbuzz \
     ca-certificates \
     ttf-freefont
+
+# Set environment variables for Puppeteer to run in a containerized environment
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 
 # Set the working directory inside the container
 WORKDIR /app
