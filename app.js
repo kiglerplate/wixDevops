@@ -54,118 +54,99 @@ const WHATSAPP_API_URL =
   "https://api.smartsend.co.il/whatsapp/api/Action/send-message";
 const WHATSAPP_TOKEN = "1FOWDZS5HZPOMKLG";
 
-const clients = {}; // מפתח = clientId, ערך = client instance
+// אובייקטים לשמירת מופעים ואתרי Wix (אם נדרש)
+const clients = {}; // מפתח = instanceId, ערך = client instance
+const wixSites = {}; // שמירה של אתרי Wix לפי instanceId
 
-// 📌 יצירת לקוח וואטסאפ חדש
-const createWhatsAppClient = async (clientId) => {
-  console.log(`📌 מחובר  מחובר מחובר`);
-  console.log(clientId, `📌 מחובר  מחובר מחובר`);
-  if (clients[clientId]) {
-    console.log(`📌 לקוח ${clientId} כבר מחובר`);
-    return clients[clientId];
+// פונקציה ליצירת מופע WhatsApp
+const createWhatsAppClient = async (instanceId) => {
+  if (!instanceId) {
+    console.log("⚠️ instanceId חסר, לא ניתן להמשיך.");
+    return;
   }
 
-  console.log(`🔄 יצירת חיבור ללקוח ${clientId}...`);
+  // אם מופע קיים כבר, נחזיר אותו
+  if (clients[instanceId]) {
+    console.log(`⚠️ מופע כבר קיים עבור ${instanceId}, מחזיר מופע קיים.`);
+    return clients[instanceId];
+  }
 
+  console.log(`🔄 יצירת חיבור ל-WhatsApp עבור ${instanceId}...`);
+
+  // שימוש ב-LocalAuth עם מזהה ייחודי - הנתונים ישמרו בתיקיות .wwebjs_auth ו-.wwebjs_cache
   const client = new Client({
-    authStrategy: new LocalAuth({ clientId }),
+    authStrategy: new LocalAuth({ clientId: instanceId }),
+    // אפשר להוסיף הגדרות Puppeteer במידת הצורך:
+    // puppeteer: { headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] }
   });
 
+  // אירוע QR - כאשר נוצר קוד, נשמור את הקוד במסד הנתונים
   client.on("qr", async (qr) => {
-    console.log(`📲 QR קוד נוצר עבור ${clientId}, מחכה לסריקה...`);
+    console.log(`📲 QR קוד נוצר עבור ${instanceId}, מחכה לסריקה...`);
     const qrDataURL = await qrcode.toDataURL(qr);
 
-    // עדכון QR בפיירבייס
-    await db.collection("whatsapp-settings").doc(clientId).set(
+    // עדכון מסמך במסד Firestore
+    await db.collection("whatsapp-settings").doc(instanceId).set(
       {
-        clientId,
+        instanceId,
         qr: qrDataURL,
         isReady: false,
-        timestamp: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       },
       { merge: true }
     );
   });
 
+  // אירוע כאשר המופע מוכן (מחובר)
   client.on("ready", async () => {
-    console.log(`✅ וואטסאפ מחובר עבור ${clientId}!`);
-
-    // עדכון סטטוס התחברות בפיירבייס
-    await db.collection("whatsapp-settings").doc(clientId).set(
+    console.log(`✅ וואטסאפ מחובר עבור ${instanceId}!`);
+    await db.collection("whatsapp-settings").doc(instanceId).set(
       {
         isReady: true,
-        timestamp: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       },
       { merge: true }
     );
   });
 
+  // אירוע שינוי מצב - אם המופע מתנתק, ננסה להתחבר מחדש
   client.on("state_changed", async (state) => {
-    console.log(`📡 שינוי מצב עבור ${clientId}:`, state);
+    console.log(`📡 שינוי מצב עבור ${instanceId}: ${state}`);
 
+    // לדוגמה: במצב "DISCONNECTED" ננקה את המופע וננסה להתחבר מחדש
     if (state === "DISCONNECTED") {
-      console.log(`⚠️ וואטסאפ נותק עבור ${clientId}, מייצר QR חדש...`);
-
-      // מחיקת הלקוח מהזיכרון
-      delete clients[clientId];
-
-      // יצירת לקוח חדש ו-QR מיידית
-      await createWhatsAppClient(clientId);
+      console.log(`⚠️ וואטסאפ נותק עבור ${instanceId}, מנסה יצירת QR חדש...`);
+      delete clients[instanceId];
+      await createWhatsAppClient(instanceId);
     }
   });
 
-  // client.on("disconnected", async () => {
-  //   console.log(`⚠️ וואטסאפ נותק עבור ${clientId}`);
-
-  //   // עדכון סטטוס בפיירבייס
-  //   await db.collection("whatsapp-settings").doc(clientId).set(
-  //     {
-  //       isReady: false,
-  //       timestamp: new Date().toISOString(),
-  //     },
-  //     { merge: true }
-  //   );
-
-  //   delete clients[clientId]; // מחיקה מהזיכרון
-  // });
-
   client.initialize();
-  clients[clientId] = client;
+  clients[instanceId] = client;
   return client;
 };
 
-// 📌 טעינה מחדש של כל הלקוחות ששמורים בפיירבייס לאחר הפעלת השרת
-const reloadClients = async () => {
-  const snapshot = await db.collection("whatsapp-settings").get();
-  snapshot.forEach((doc) => {
-    const data = doc.data();
-    if (data.isReady) {
-      createWhatsAppClient(data.clientId);
-    }
-  });
-};
-
-reloadClients();
-
+// API לרישום מופע חדש
 app.post("/whatsapp/register", async (req, res) => {
-  const { phoneNumber } = req.body;
-  if (!phoneNumber) {
-    return res.status(400).json({ error: "חובה לספק מספר טלפון" });
+  const { instanceId } = req.body;
+
+  if (!instanceId) {
+    return res.status(400).json({ error: "חובה לספק instanceId" });
   }
 
-  const clientId = `client-${phoneNumber}`;
+  if (clients[instanceId]) {
+    return res.status(400).json({ error: "כבר קיים מופע פעיל עבור instanceId זה." });
+  }
 
-  console.log(`📌 יצירת לקוח חדש עבור ${clientId}`);
-
-  // יצירת לקוח חדש
-  await createWhatsAppClient(clientId);
-
-  return res.json({ success: true, clientId });
+  console.log(`📌 יצירת מופע חדש עבור ${instanceId}`);
+  await createWhatsAppClient(instanceId);
+  return res.json({ success: true, instanceId });
 });
 
-app.get("/whatsapp/qr/:clientId", async (req, res) => {
-  const clientId = req.params.clientId;
-  const doc = await db.collection("whatsapp-settings").doc(clientId).get();
+// API לשליפת QR (או סטטוס התחברות)
+app.get("/whatsapp/qr/:instanceId", async (req, res) => {
+  const instanceId = req.params.instanceId;
+  const doc = await db.collection("whatsapp-settings").doc(instanceId).get();
 
   if (!doc.exists) {
     return res.status(404).json({ error: "לקוח לא נמצא" });
@@ -179,156 +160,108 @@ app.get("/whatsapp/qr/:clientId", async (req, res) => {
   }
 });
 
-// 📌 API לשליחת הודעות לפי `clientId`
-app.post("/whatsapp/send/:clientId", async (req, res) => {
-  const { clientId } = req.params;
-  const { number, message } = req.body;
-
+// API לשליחת הודעות דרך מופע קיים
+app.post("/whatsapp/send", async (req, res) => {
+  const { clientId, number, message } = req.body;
   if (!clients[clientId]) {
     return res.status(400).json({ error: `לקוח ${clientId} לא מחובר` });
   }
-
   try {
     await clients[clientId].sendMessage(`${number}@c.us`, message);
     console.log(`📩 הודעה נשלחה ל-${number} דרך ${clientId}`);
     res.json({ success: true });
   } catch (error) {
-    console.error(`❌ שגיאה בשליחת הודעה:`, error);
+    console.error("❌ שגיאה בשליחת הודעה:", error);
     res.status(500).json({ error: "שגיאה בשליחת ההודעה" });
   }
 });
 
-setInterval(async () => {
-  const snapshot = await db.collection("whatsapp-settings").get();
-  snapshot.forEach(async (doc) => {
-    const data = doc.data();
-    if (!data.isReady) {
-      console.log(`🔄 מנסה לחבר מחדש את ${data.clientId}...`);
-      await createWhatsAppClient(data.clientId);
-    }
-  });
-}, 5 * 60 * 1000); // כל 5 דקות
+// API לקבלת Webhooks (לדוגמה מאתר Wix)
+app.post("/webhook", express.text(), async (req, res) => {
+  console.log("🔍 Headers:", req.headers);
+  console.log("Received Webhook");
 
-app.post("/webhook", express.text(), async (request, response) => {
-  console.log("🔍 Headers:", request.headers);
-
-  console.log("Received");
+  let instanceId;
   let event;
   let eventData;
 
   try {
-    const rawPayload = jwt.verify(request.body, PUBLIC_KEY);
+    // אימות JWT וקבלת payload
+    const rawPayload = jwt.verify(req.body, PUBLIC_KEY);
+    console.log("🔐 Decoded JWT:", rawPayload);
+
+    instanceId = rawPayload.instanceId || "Unknown";
+    console.log(`🆔 Wix Site Instance ID: ${instanceId}`);
+
+    // ניתן לעדכן/להוסיף את האתר לטבלת wixSites
+    if (!wixSites[instanceId]) {
+      wixSites[instanceId] = `Wix Site ${instanceId}`;
+      console.log(`🆕 New Wix Site detected: ${instanceId}`);
+    }
+
     event = JSON.parse(rawPayload.data);
     eventData = JSON.parse(event.data);
   } catch (err) {
-    console.error(err);
-    response.status(400).send(`Webhook error: ${err.message}`);
-    return;
+    console.error("⚠️ JWT Verification Error:", err);
+    return res.status(400).send(`Webhook error: ${err.message}`);
   }
 
+  // טיפול לפי סוג האירוע (לדוגמה, order_created או order_updated)
   switch (event.eventType) {
     case "wix.ecom.v1.order_created":
-    // console.log(
-    //   `wix.ecom.v1.order_created event received with data:`,
-    //   eventData
-    // );
-    //
-    // handle your event here
-    //
+      console.log(`📦 Order Created from ${wixSites[instanceId]}:`, eventData);
+      // עדכון מסד הנתונים או טיפול נוסף
+      break;
     case "wix.ecom.v1.order_updated":
-      // console.log(
-      //   `wix.ecom.v1.order_updated event received with data:`,
-      //   eventData
-      // );
-
+      console.log(`🔄 Order Updated from ${wixSites[instanceId]}:`, eventData);
+      // לדוגמה, שליחת הודעה ללקוח במקרה שההזמנה הושלמה:
       if (eventData?.updatedEvent?.currentEntity) {
         const order = eventData.updatedEvent.currentEntity;
-
-        // 🛒 פרטי הלקוח (Buyer Info)
-        if (order.buyerInfo) {
-          console.log(
-            "📞 Buyer Info:",
-            JSON.stringify(order.buyerInfo, null, 2)
-          );
-        } else {
-          console.log("⚠️ No Buyer Info Found");
-        }
-
-        if (order.shippingInfo) {
-          console.log(
-            "📞 Buyer Info:",
-            JSON.stringify(order.shippingInfo, null, 2)
-          );
-        } else {
-          console.log("⚠️ No Buyer Info Found");
-        }
-
-        // 📦 פרטי מקבל המשלוח (Recipient Info)
-        if (
-          order.recipientInfo?.contactDetails &&
-          order.shippingInfo?.logistics?.pickupDetails
-        ) {
-          console.log(
-            "📦 Recipient Info:",
-            JSON.stringify(order.recipientInfo.contactDetails, null, 2)
-          );
-
-          if (order.fulfillmentStatus === "FULFILLED") {
-            const customerPhone = order.recipientInfo.contactDetails?.phone;
-            const customerName =
-              order.recipientInfo.contactDetails?.firstName || "לקוח יקר";
-            const orderId = order.number || "XXXXX";
-
-            if (!customerPhone) {
-              console.error("❌ לא נמצא מספר טלפון של הלקוח!");
-              return res.status(400).send("Missing customer phone number");
-            }
-
-            const formattedPhone = customerPhone.replace(/\D/g, "");
-
-            const message = `שלום ${customerName},\n\nהלוחית שלך מוכנה לאיסוף!\nאנא הגיע לנקודת החלוקה שלך.\n\nמספר ההזמנה: ${orderId}`;
-
-            console.log(`📤 שולח הודעה ל-${formattedPhone}: ${message}`);
-
-            try {
-              const response = await axios.post(
-                WHATSAPP_API_URL,
-                {
-                  phone: formattedPhone,
-                  message: message,
-                },
-                {
-                  headers: {
-                    "Content-Type": "application/json",
-                    token: WHATSAPP_TOKEN,
-                  },
-                }
-              );
-
-              console.log("✅ הודעה נשלחה בהצלחה:", response.data);
-            } catch (error) {
-              console.error(
-                "❌ שגיאה בשליחת ההודעה:",
-                error.response ? error.response.data : error.message
-              );
-            }
+        if (order.fulfillmentStatus === "FULFILLED") {
+          const customerPhone = order.recipientInfo?.contactDetails?.phone;
+          if (!customerPhone) {
+            console.error("❌ לא נמצא מספר טלפון של הלקוח!");
+            return res.status(400).send("Missing customer phone number");
           }
-        } else {
-          console.log("⚠️ No Recipient Info Found");
+          const formattedPhone = customerPhone.replace(/\D/g, "");
+          const message = `שלום, ההזמנה ${order.number || "N/A"} הושלמה!`;
+          // אפשר להשתמש גם במופע WhatsApp כדי לשלוח הודעה
+          try {
+            // נניח ש־instanceId זהה למופע WhatsApp שלך:
+            await clients[instanceId].sendMessage(`${formattedPhone}@c.us`, message);
+            console.log(`📤 הודעה נשלחה ל-${formattedPhone}`);
+          } catch (error) {
+            console.error("❌ שגיאה בשליחת הודעה:", error);
+          }
         }
-      } else {
-        console.log("⚠️ No `currentEntity` found in updatedEvent");
       }
-
       break;
-
     default:
-      console.log(`Received unknown event type: ${event.eventType}`);
+      console.log(`⚠️ Unknown event type received: ${event.eventType}`);
       break;
   }
-
-  response.status(200).send();
+  res.status(200).send();
 });
+
+const reloadClients = async () => {
+  try {
+    const snapshot = await db.collection("whatsapp-settings").get();
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      // נניח שברצונך לנסות ליצור מופע מחדש אם הוא היה במצב פעיל
+      if (data.isReady) {
+        console.log(`🔄 טוען מופע מחדש עבור ${data.instanceId}...`);
+        createWhatsAppClient(data.instanceId);
+      }
+    });
+  } catch (error) {
+    console.error("❌ שגיאה בטעינת מופעים:", error);
+  }
+};
+
+// קריאה לפונקציה בעת אתחול השרת
+reloadClients();
+
 
 app.listen(port, () => {
   console.log(`App listening on port ${port}`);
